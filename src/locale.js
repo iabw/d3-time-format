@@ -158,9 +158,39 @@ export default function formatLocale(locale) {
   utcFormats.X = newFormat(locale_time, utcFormats);
   utcFormats.c = newFormat(locale_dateTime, utcFormats);
 
+  // Cribbed from:
+  // https://stackoverflow.com/questions/9539513/is-there-a-reliable-way-in-javascript-to-obtain-the-number-of-decimal-places-of
+  function getDecimalPlaces(n) {
+    var s = "" + (+n);
+    var match = /(?:\.(\d+))?(?:[eE]([+\-]?\d+))?$/.exec(s);
+    if (!match) { return 0; }
+    return Math.max(
+      0,  // lower limit.
+      (match[1] == '0' ? 0 : (match[1] || '').length)  // fraction length
+      - (match[2] || 0));  // exponent
+   }
+
+  function removeDecimalFromMicroscondTimstamp(d) {
+    var multiplier = getDecimalPlaces(d);
+    return d * Math.pow(10, multiplier);
+  }
+
+  function getTimestampFromMicrosecondTimestamp(d) {
+    return (""+d).slice(0,13);
+  }
+
+  function ensureFullMicroseconds(d) {
+    d = removeDecimalFromMicroscondTimstamp(d);
+    d = (""+d).slice(0, 16);
+    return padRight(d, "0", 16);
+  }
+
   function newFormat(specifier, formats) {
-    return function(date) {
-      var string = [],
+    return function(d) {
+      var expectedToHaveMics = specifier.indexOf("%f") > -1,
+          date = expectedToHaveMics ? getTimestampFromMicrosecondTimestamp(d) : d,
+          d = expectedToHaveMics ? ensureFullMicroseconds(d) : d,
+          string = [],
           i = -1,
           j = 0,
           n = specifier.length,
@@ -175,7 +205,10 @@ export default function formatLocale(locale) {
           string.push(specifier.slice(j, i));
           if ((pad = pads[c = specifier.charAt(++i)]) != null) c = specifier.charAt(++i);
           else pad = c === "e" ? " " : "0";
-          if (format = formats[c]) c = format(date, pad);
+          if (c === "f") {
+            if (format = formats[c]) c = format(d, pad);
+          }
+          else if (format = formats[c]) c = format(date, pad);
           string.push(c);
           j = i + 1;
         }
@@ -373,6 +406,13 @@ function pad(value, fill, width) {
   return sign + (length < width ? new Array(width - length + 1).join(fill) + string : string);
 }
 
+function padRight(value, fill, width) {
+  var sign = value < 0 ? "-" : "",
+      string = (sign ? -value : value) + "",
+      length = string.length;
+  return sign + (length < width ? string + new Array(width - length + 1).join(fill) : string);
+}
+
 function requote(s) {
   return s.replace(requoteRe, "\\$&");
 }
@@ -503,7 +543,8 @@ function formatMilliseconds(d, p) {
 }
 
 function formatMicroseconds(d, p) {
-  return formatMilliseconds(d, p) + "000";
+  // The only way we can format microseconds is if date was passed as a number and not as a date object
+  return pad(("" + d).slice(13,16), p, 3);
 }
 
 function formatMonthNumber(d, p) {
